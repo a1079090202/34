@@ -2,8 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { apiFetch, useOperator } from '../client';
-import { LESSON_SLOTS } from '@/lib/rules/slots';
+import { apiFetch, useOperator, isStaffRole } from '../client';
+import { LESSON_SLOTS, LESSON_MINUTES } from '@/lib/rules/slots';
 import { addDays, todayLocal } from '@/lib/date';
 
 interface Student { id: number; name: string; }
@@ -20,7 +20,8 @@ function fmtMin(min: number) {
 }
 
 function BookInner() {
-  const { operatorId } = useOperator();
+  const { operatorId, role } = useOperator();
+  const canStaff = isStaffRole(role);
   const sp = useSearchParams();
   const [students, setStudents] = useState<Student[]>([]);
   const [instructors, setInstructors] = useState<Instructor[]>([]);
@@ -65,7 +66,7 @@ function BookInner() {
   const busyStarts = useMemo(() => {
     const set = new Set<number>();
     bookings.filter((b) => b.instructorId === Number(form.instructorId)).forEach((b) => {
-      for (let m = b.startMin; m < b.endMin; m += 60) set.add(m);
+      for (let m = b.startMin; m < b.endMin; m += LESSON_MINUTES) set.add(m);
     });
     return set;
   }, [bookings, form.instructorId]);
@@ -96,7 +97,7 @@ function BookInner() {
   return (
     <div>
       <div className="card">
-        <h2>约课（先过学费闸门，再查教练/车辆冲突与同日两课时上限）</h2>
+        <h2>约课（先过学费闸门，再查有效期/课时余额，最后查教练/车辆冲突与同日两课时上限）</h2>
         <form className="row" onSubmit={submit}>
           <div className="field">
             <label>学员</label>
@@ -141,8 +142,9 @@ function BookInner() {
               ))}
             </select>
           </div>
-          <button type="submit" disabled={!operatorId || !form.studentId || !form.vehicleId}>约课</button>
+          <button type="submit" disabled={!operatorId || !form.studentId || !form.vehicleId || !canStaff}>约课</button>
           {!operatorId && <span className="muted">请先在右上角选择操作人</span>}
+          {operatorId && !canStaff && <span className="muted">教练角色无约课权限，请用前台或管理员账号</span>}
         </form>
         {msg && <div className={`msg ${msg.kind}`}><b>{msg.kind === 'ok' ? '✅ ' : '⛔ '}</b>{msg.text}</div>}
       </div>

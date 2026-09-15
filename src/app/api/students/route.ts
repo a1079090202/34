@@ -1,31 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createStudent, listStudents } from '@/lib/services/students';
-import { requireObj, str, posIntId, dateStr, yuanField, enumField, int } from '@/lib/validation';
-import { requireOperator } from '@/lib/operator';
-import { addYears, todayLocal } from '@/lib/date';
-import { evaluateValidity } from '@/lib/rules';
+import { requireObj, str, posIntId, dateBetween, yuanField, enumField, int } from '@/lib/validation';
+import { requireRole, ROLES } from '@/lib/operator';
+import { addYears, todayLocal, MIN_DATE } from '@/lib/date';
+import { evaluateValidity, findFirstOverdue } from '@/lib/rules';
 
 export async function GET() {
   const today = todayLocal();
   const students = listStudents().map((s) => {
     const v = evaluateValidity(s.expiryDate, today);
     const totalPaid = s.installments.reduce((sum, i) => sum + i.paidCents, 0);
-    const overdue = s.installments
-      .filter((i) => i.dueDate < today && i.paidCents < i.amountCents)
-      .sort((a, b) => a.seq - b.seq);
+    const overdueSeq = findFirstOverdue(s.installments, today)?.seq ?? null;
     return {
       ...s,
       paidCents: totalPaid,
       validity: { daysLeft: v.daysLeft, status: v.status, label: v.label, highlight: v.highlight },
-      overdueSeq: overdue[0]?.seq ?? null,
+      overdueSeq,
     };
   });
   return NextResponse.json({ today, students });
 }
 
 export async function POST(req: NextRequest) {
-  const op = requireOperator(req);
-  if (!op.ok) return NextResponse.json({ error: op.message }, { status: 401 });
+  const op = requireRole(req, ROLES.staff);
+  if (!op.ok) return NextResponse.json({ error: op.message }, { status: op.status });
 
   const parsed = requireObj(await req.json().catch(() => null));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -33,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const name = str(o, 'name');
   const phone = str(o, 'phone');
-  const enrollmentDate = dateStr(o, 'enrollmentDate');
+  const enrollmentDate = dateBetween(o, 'enrollmentDate', MIN_DATE, todayLocal());
   const totalFeeCents = yuanField(o, 'totalFeeYuan');
   const plan = enumField(o, 'plan', ['full', 'installments'] as const);
   const purchasedHours = int(o, 'purchasedHours');
@@ -42,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!phone || !/^[\d-]{6,20}$/.test(phone)) {
     return NextResponse.json({ error: '联系电话格式不正确（6-20 位数字/横杠）' }, { status: 400 });
   }
-  if (!enrollmentDate) return NextResponse.json({ error: '报名日期不合法' }, { status: 400 });
+  if (!enrollmentDate) return NextResponse.json({ error: '报名日期不合法或晚于今天（YYYY-MM-DD）' }, { status: 400 });
   if (totalFeeCents === null || totalFeeCents <= 0) {
     return NextResponse.json({ error: '学费金额必须是正数（元，最多两位小数）' }, { status: 400 });
   }

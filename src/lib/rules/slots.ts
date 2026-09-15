@@ -17,11 +17,10 @@ export const LESSON_SLOTS: SlotDef[] = [
   h(13), h(14), h(15), h(16), h(17),
 ];
 
-export function slotToRange(startMin: number): { startMin: number; endMin: number; label: string } {
-  const slot = LESSON_SLOTS.find((s) => s.startMin === startMin);
-  return {
-    startMin,
-    endMin: startMin + LESSON_MINUTES,
-    label: slot?.label ?? '',
-  };
+// 可约课的开始时刻集合——前端下拉与服务端校验共用这一份事实源，
+// 避免出现「页面只能选营业时段、API 却能约凌晨/午休」的前后端漂移。
+const BOOKABLE_START_MINUTES = new Set(LESSON_SLOTS.map((s) => s.startMin));
+
+export function isBookableStartMinute(startMin: number): boolean {
+  return Number.isInteger(startMin) && BOOKABLE_START_MINUTES.has(startMin);
 }

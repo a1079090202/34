@@ -1,15 +1,18 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../db';
-import { todayLocal } from '../date';
+import { isValidDate, todayLocal } from '../date';
 import {
   checkBookingConflict,
   checkTuitionGate,
+  checkLessonExpiry,
+  checkHoursBalance,
   type BookingBlock,
+  type EligibilityBlock,
   type ExistingSlot,
   type RequestedSlot,
   type TuitionBlock,
 } from '../rules';
-import { LESSON_MINUTES } from '../rules/slots';
+import { LESSON_MINUTES, isBookableStartMinute } from '../rules/slots';
 import { isVehicleBoundToInstructor } from './resources';
 
 export interface BookingInput {
@@ -27,6 +30,7 @@ export type BookingError =
   | { code: 'vehicle_not_bound'; message: string }
   | { code: 'bad_slot'; message: string }
   | { code: 'tuition_blocked'; block: TuitionBlock; message: string }
+  | { code: 'eligibility_blocked'; block: EligibilityBlock; message: string }
   | { code: 'booking_blocked'; block: BookingBlock; message: string };
 
 export type BookingResult = { ok: true; bookingId: number } | { ok: false; error: BookingError };
@@ -52,6 +56,21 @@ function getDaySlots(db: Database.Database, lessonDate: string): ExistingSlot[] 
   return rows;
 }
 
+/** 学员课时占用：已消课（lesson_ledger 汇总）+ 已约未消（booked）单数 */
+function getHoursBalance(
+  db: Database.Database,
+  studentId: number,
+  purchasedHours: number,
+): { purchasedHours: number; consumedHours: number; bookedCount: number } {
+  const consumed = db
+    .prepare(`SELECT COALESCE(SUM(-delta_hours), 0) AS n FROM lesson_ledger WHERE student_id = ?`)
+    .get(studentId) as { n: number };
+  const booked = db
+    .prepare(`SELECT COUNT(*) AS n FROM bookings WHERE student_id = ? AND status = 'booked'`)
+    .get(studentId) as { n: number };
+  return { purchasedHours, consumedHours: consumed.n, bookedCount: booked.n };
+}
+
 /**
  * 约课核心。规则全部在独立模块里算：
  *   1) 学费闸门 checkTuitionGate（逾期应收未收 → 拦，写明卡在哪一期）
@@ -59,7 +78,9 @@ function getDaySlots(db: Database.Database, lessonDate: string): ExistingSlot[] 
  * 路由层只做参数校验，金额永远不经过前端计算。
  */
 export function createBooking(input: BookingInput, db: Database.Database = getDb()): BookingResult {
-  const student = db.prepare(`SELECT id FROM students WHERE id = ?`).get(input.studentId);
+  const student = db
+    .prepare(`SELECT id, expiry_date AS expiryDate, purchased_hours AS purchasedHours FROM students WHERE id = ?`)
+    .get(input.studentId) as { id: number; expiryDate: string; purchasedHours: number } | undefined;
   if (!student) {
     return { ok: false, error: { code: 'not_found', message: '学员不存在' } };
   }
@@ -77,8 +98,11 @@ export function createBooking(input: BookingInput, db: Database.Database = getDb
       error: { code: 'vehicle_not_bound', message: '该车辆未绑定到此教练，请选择教练名下车辆' },
     };
   }
-  if (input.startMin < 0 || input.startMin + LESSON_MINUTES > 24 * 60 || input.startMin % 60 !== 0) {
-    return { ok: false, error: { code: 'bad_slot', message: '约课时段不合法（整点 1 课时）' } };
+  if (!isBookableStartMinute(input.startMin)) {
+    return { ok: false, error: { code: 'bad_slot', message: '约课时段不合法：仅限营业时段整点 1 课时（08-11、13-17 点开始）' } };
+  }
+  if (!isValidDate(input.lessonDate)) {
+    return { ok: false, error: { code: 'bad_slot', message: '约课日期不合法（YYYY-MM-DD）' } };
   }
   if (input.lessonDate < todayLocal()) {
     return { ok: false, error: { code: 'bad_slot', message: '不能约过去的日期' } };
@@ -100,7 +124,17 @@ export function createBooking(input: BookingInput, db: Database.Database = getDb
       return { ok: false, error: { code: 'tuition_blocked', block: tuition, message: tuition.message } };
     }
 
-    // 闸门 2：教练/车辆同时段冲突 + 同日两课时上限
+    // 闸门 2：学员资格——两年有效期（上课日不得晚于到期日）、课时余额（消课+已约占用）
+    const expiry = checkLessonExpiry(input.lessonDate, student.expiryDate);
+    if (expiry) {
+      return { ok: false, error: { code: 'eligibility_blocked', block: expiry, message: expiry.message } };
+    }
+    const hours = checkHoursBalance(getHoursBalance(db, input.studentId, student.purchasedHours));
+    if (hours) {
+      return { ok: false, error: { code: 'eligibility_blocked', block: hours, message: hours.message } };
+    }
+
+    // 闸门 3：教练/车辆同时段冲突 + 同日两课时上限
     const block = checkBookingConflict(request, getDaySlots(db, input.lessonDate));
     if (block) {
       return { ok: false, error: { code: 'booking_blocked', block, message: block.message } };

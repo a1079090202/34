@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SCHEMA_SQL } from './schema';
+import { migrateDateGuards } from './migrate';
 
 // 默认数据库放店里旧主机的项目目录 data/ 下；测试通过环境变量指到内存库。
 // 注意：默认路径必须惰性读取——本模块会先于测试文件里的 env 赋值被 import 求值。
@@ -19,6 +20,8 @@ export function createDb(dbPath: string = process.env.DRIVING_SCHOOL_DB || DEFAU
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA_SQL);
+  // 旧库一次性补日期 CHECK（新库/内存库检测到守卫标记即 no-op，幂等）
+  migrateDateGuards(db);
   return db;
 }
 

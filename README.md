@@ -31,13 +31,20 @@ npm run build && npm start
 npm test
 ```
 
-28 个用例，覆盖需求指定的四条规则：
+100+ 个用例，覆盖核心规则与工程约束：
 
 | 测试文件 | 覆盖内容 |
 | --- | --- |
 | `test/conflict.test.ts` | 同教练同时段冲突、同车同时段冲突（一车一时段一人）、背靠背不算冲突、取消单不占位、**同日 2 课时上限** |
 | `test/tuition.test.ts` | **学费闸门**：逾期应收未收拦截、指明卡在哪一期、部分缴纳按欠额、应缴日当天不逾期 |
 | `test/validity.test.ts` | **有效期倒计时**：60/59 天边界、到期日、已过期、**不足 60 天标黄**、时钟拨后两天倒计时同步 |
+| `test/eligibility.test.ts` / `eligibility.service.test.ts` | **约课资格**：上课日不得晚于有效期到期日；课时余额（消课+已约占用 ≤ 购买课时），取消释放、消课计占 |
+| `test/slots.test.ts` | **营业时段**：仅 08-11、13-17 点开始的整点 1 课时可约，凌晨/午休/整点外拒绝（前后端共用） |
+| `test/date.test.ts` | **严格日期校验**：2/31、13 月、00 日、0000 年等 JS 进位陷阱一律拒绝 |
+| `test/migrate.test.ts` | 旧库表重建迁移：行数/主键/外键/UNIQUE/索引保留、日期 CHECK 生效、可空列放行、幂等 |
+| `test/date-gates.test.ts` | 服务层相对边界（报名/缴费/通过日 ≤ 今天、约课 ≥ 今天）+ 绕过服务层裸插非法日期被 CHECK 硬拒 |
+| `test/arrears.test.ts` | 欠费报表「截至月末」时点口径：之后月份补缴不冲减历史欠费，历史月份可复现 |
+| `test/rbac.test.ts` | 路由鉴权：无身份 401、教练越权 403、前台/管理员放行；消课三角色均可；报表 `?op=` 直链鉴权 |
 | `test/booking.service.test.ts` | 真实 SQLite 事务串联：闸门→冲突→上限→消课生成带教记录/课时账→操作人留痕 |
 
 测试固定使用内存库（`:memory:`），不会碰 `data/` 里的营业数据。
@@ -96,9 +103,29 @@ npm run backup     # 在线热备份到 data/backups/driving-school-YYYYMMDD-HHM
 | --- | --- | --- |
 | 有效期倒计时 | `src/lib/rules/validity.ts` | 到期日 − 今天；`< 60` 天或已过期 → `highlight=true`，列表标黄 |
 | 约课冲突/上限 | `src/lib/rules/conflict.ts` | 教练、车辆、学员本人三组时间重叠判定 + 同日 2 课时计数；取消单不占位；整点 1 课时 |
-| 学费闸门 | `src/lib/rules/tuition.ts` | 存在 `应缴日 < 今天 且 已收 < 应收` 的分期即拦，返回期次/欠额；约课时在数据库事务内先过闸再查冲突 |
+| 学费闸门 | `src/lib/rules/tuition.ts` | 存在 `应缴日 < 今天 且 已收 < 应收` 的分期即拦，返回期次/欠额；`findFirstOverdue` 同时供学员列表逾期标记使用（单一口径）；约课时在数据库事务内先过闸再查冲突 |
+| 约课资格 | `src/lib/rules/eligibility.ts` | 上课日不得晚于有效期到期日；已消课 + 已约未消 + 本单 ≤ 购买课时 |
+| 营业时段 | `src/lib/rules/slots.ts` | `LESSON_SLOTS`（08-11、13-17 点开始）是前端下拉与服务端 `isBookableStartMinute` 校验的同一份事实源 |
+| 严格日期 | `src/lib/date.ts` | `isValidDate/isValidMonth` 按真实日历拆分校验（拒绝 2/31、13 月、0000 年等 JS 进位值），年份限 1900-2100 |
 
-三者都是**纯函数**，输入数据、输出拦截原因，不碰数据库，可独立单测。
+规则模块都是**纯函数**，输入数据、输出拦截原因，不碰数据库，可独立单测。
+
+## 角色权限（RBAC）
+
+服务端在 Route Handler 用 `requireRole` 强制鉴权（`src/lib/operator.ts`）：无身份 **401**、角色越权 **403**；前端按当前角色隐藏无权操作。这是店内共享终端的「按角色分权」，不是登录认证。
+
+| 操作 | 前台 front_desk | 教练 instructor | 管理员 admin |
+| --- | :-: | :-: | :-: |
+| 建档 / 科目登记 / 收费 / 约课 / 取消 | ✓ | ✗ | ✓ |
+| 消课 | ✓ | ✓ | ✓ |
+| 查看名册 / 课表 / 资源 | ✓ | ✓ | ✓ |
+| 下载月末 CSV 报表 | ✓ | ✗ | ✓ |
+
+CSV 是浏览器直链（带不了自定义头），身份可经 `?op=<操作人ID>` 传入，仍按上表鉴权。
+
+## 日期入库约束
+
+日期列在数据库层带 `CHECK`（真实日历 + 1900-2100，相等判断用 `IS` 而非 `=`，否则 13 月这类 `date()` 返回 NULL 会绕过约束）。旧库由 `src/lib/migrate.ts` 在启动时一次性、幂等地表重建迁移；新库与测试内存库直接带约束。
 
 ## 数据模型要点
 
@@ -118,7 +145,7 @@ npm run backup     # 在线热备份到 data/backups/driving-school-YYYYMMDD-HHM
 | POST | `/api/students/:id/subject` | 登记科目一~四通过/撤销 |
 | GET | `/api/resources` | 教练、车辆及绑定关系 |
 | GET | `/api/operators` | 操作人下拉 |
-| GET/POST | `/api/bookings` | 查课表 / 约课（闸门+冲突+上限） |
+| GET/POST | `/api/bookings` | 查课表 / 约课（学费→有效期/课时→营业时段→冲突/上限，事务内重查） |
 | POST | `/api/bookings/:id/complete` | 消课（扣课时 + 生成带教记录） |
 | DELETE | `/api/bookings/:id` | 取消约课 |
 | POST | `/api/payments` | 登记收费（元入参→分，全程服务端） |
@@ -133,8 +160,9 @@ npm run backup     # 在线热备份到 data/backups/driving-school-YYYYMMDD-HHM
 scripts/seed.ts            样例数据（幂等，可重跑）
 scripts/backup.mjs         在线热备份
 scripts/fake-clock.mjs     验收用时钟偏移（不入业务）
-src/lib/rules/             三条独立规则（纯函数）
+src/lib/rules/             纯函数规则（冲突/学费/有效期/约课资格/时段）
 src/lib/services/          事务与数据库操作
+src/lib/migrate.ts         旧库日期 CHECK 一次性表重建迁移（幂等）
 src/app/api/               Route Handler（只做参数校验）
 src/app/                   学员页 / 约课页 / 课表消课页
 test/                      Vitest 单元与服务层集成测试

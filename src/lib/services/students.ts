@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getDb } from '../db';
-import { addYears } from '../date';
+import { addDays, addYears, isValidDate, todayLocal } from '../date';
 
 export interface NewStudentInput {
   name: string;
@@ -19,6 +19,9 @@ function splitInstallments(totalCents: number): number[] {
 }
 
 export function createStudent(input: NewStudentInput, db: Database.Database = getDb()): number {
+  if (!isValidDate(input.enrollmentDate) || input.enrollmentDate > todayLocal()) {
+    throw new Error('报名日期不合法或晚于今天');
+  }
   const expiryDate = addYears(input.enrollmentDate, 2);
   const amounts =
     input.plan === 'full' ? [input.totalFeeCents] : splitInstallments(input.totalFeeCents);
@@ -50,11 +53,7 @@ export function createStudent(input: NewStudentInput, db: Database.Database = ge
        VALUES (?, ?, ?, ?)`,
     );
     amounts.forEach((amount, i) => {
-      const due = new Date(input.enrollmentDate + 'T00:00:00');
-      due.setDate(due.getDate() + dueOffsets[i]);
-      const dueDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(
-        due.getDate(),
-      ).padStart(2, '0')}`;
+      const dueDate = addDays(input.enrollmentDate, dueOffsets[i]);
       ins.run(studentId, i + 1, dueDate, amount);
     });
 
@@ -160,6 +159,9 @@ export function setSubjectStatus(
   passedDate: string | null,
   operatorId: number,
 ): void {
+  if (status === 'passed' && (!passedDate || !isValidDate(passedDate) || passedDate > todayLocal())) {
+    throw new Error('科目通过日期不合法或晚于今天');
+  }
   const db = getDb();
   db.prepare(
     `UPDATE subject_records

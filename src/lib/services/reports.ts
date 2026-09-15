@@ -38,8 +38,10 @@ export function instructorHoursCsv(month: string): string {
 }
 
 /**
- * 月末表 2：学员欠费表。
- * 截至月末仍未缴清的分期（应收 > 已收），逐期列出；金额按分/元两列输出。
+ * 月末表 2：学员欠费表（时点快照，历史月份可复现）。
+ * 「截至该月末」仍未缴清的分期（应收 > 已收），逐期列出；金额按分/元两列输出。
+ * 关键：已收金额必须只统计 paid_date <= 月末的回款——之后月份的补缴不能冲减
+ * 历史月末的欠费，否则重跑历史月份会得到与当时不同的结果。
  */
 export function arrearsCsv(month: string): string {
   const db = getDb();
@@ -48,13 +50,14 @@ export function arrearsCsv(month: string): string {
     .prepare(
       `SELECT s.id AS student_id, s.name AS student_name, s.phone,
               i.seq, i.due_date, i.amount_cents,
-              COALESCE((SELECT SUM(amount_cents) FROM payments p WHERE p.installment_id = i.id), 0) AS paid_cents
+              COALESCE((SELECT SUM(amount_cents) FROM payments p
+                         WHERE p.installment_id = i.id AND p.paid_date <= @end), 0) AS paid_cents
        FROM installments i
        JOIN students s ON s.id = i.student_id
-       WHERE paid_cents < i.amount_cents AND i.due_date <= ?
+       WHERE paid_cents < i.amount_cents AND i.due_date <= @end
        ORDER BY i.due_date, s.id, i.seq`,
     )
-    .all(end) as {
+    .all({ end }) as {
       student_id: number;
       student_name: string;
       phone: string;

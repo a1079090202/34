@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createBooking, listBookings } from '@/lib/services/booking';
 import { requireObj, posIntId, dateStr, enumField, int } from '@/lib/validation';
-import { requireOperator } from '@/lib/operator';
-import { addDays, todayLocal } from '@/lib/date';
+import { requireRole, ROLES } from '@/lib/operator';
+import { addDays, todayLocal, isValidDate } from '@/lib/date';
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const from = url.searchParams.get('from') || todayLocal();
-  const to = url.searchParams.get('to') || addDays(todayLocal(), 7);
+  const fromParam = url.searchParams.get('from');
+  const toParam = url.searchParams.get('to');
+  const from = fromParam ?? todayLocal();
+  const to = toParam ?? addDays(todayLocal(), 7);
+  if (!isValidDate(from) || !isValidDate(to) || from > to) {
+    return NextResponse.json(
+      { error: '日期区间不合法（需为 YYYY-MM-DD 且起始不晚于结束）' },
+      { status: 400 },
+    );
+  }
   return NextResponse.json({ bookings: listBookings(from, to) });
 }
 
 export async function POST(req: NextRequest) {
-  const op = requireOperator(req);
-  if (!op.ok) return NextResponse.json({ error: op.message }, { status: 401 });
+  const op = requireRole(req, ROLES.staff);
+  if (!op.ok) return NextResponse.json({ error: op.message }, { status: op.status });
 
   const parsed = requireObj(await req.json().catch(() => null));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -60,6 +68,7 @@ export async function POST(req: NextRequest) {
         error: result.error.message,
         ...(result.error.code === 'tuition_blocked' ? { tuition: result.error.block } : {}),
         ...(result.error.code === 'booking_blocked' ? { block: result.error.block } : {}),
+        ...(result.error.code === 'eligibility_blocked' ? { block: result.error.block } : {}),
       },
       { status },
     );

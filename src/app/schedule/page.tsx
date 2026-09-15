@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch, useOperator } from '../client';
+import { apiFetch, useOperator, isStaffRole } from '../client';
 import { addDays, currentMonth, todayLocal } from '@/lib/date';
 
 interface Booking {
@@ -16,7 +16,8 @@ function fmtMin(min: number) {
 }
 
 export default function SchedulePage() {
-  const { operatorId } = useOperator();
+  const { operatorId, role } = useOperator();
+  const canStaff = isStaffRole(role);
   const [from, setFrom] = useState(todayLocal());
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -75,7 +76,9 @@ export default function SchedulePage() {
                     {b.status === 'booked' ? (
                       <span className="row" style={{ gap: 6 }}>
                         <button onClick={() => complete(b.id)} disabled={!operatorId}>消课</button>
-                        <button className="ghost" onClick={() => cancel(b.id)} disabled={!operatorId}>取消</button>
+                        {canStaff && (
+                          <button className="ghost" onClick={() => cancel(b.id)} disabled={!operatorId}>取消</button>
+                        )}
                       </span>
                     ) : <span className="muted">—</span>}
                   </td>
@@ -89,11 +92,19 @@ export default function SchedulePage() {
 
       <div className="card">
         <h2>月末报表（CSV）</h2>
-        <p className="muted">默认导出当前自然月（{currentMonth()}），可在 URL 上指定月份。</p>
-        <div className="row">
-          <a className="btn" href={`/api/reports/instructor-hours.csv?month=${currentMonth()}`}>下载教练带教课时表</a>
-          <a className="btn ghost" href={`/api/reports/arrears.csv?month=${currentMonth()}`}>下载学员欠费表</a>
-        </div>
+        {!operatorId ? (
+          <p className="muted">请先在右上角选择当前操作人</p>
+        ) : !canStaff ? (
+          <p className="muted">教练角色无报表下载权限，请用前台或管理员账号</p>
+        ) : (
+          <>
+            <p className="muted">默认导出当前自然月（{currentMonth()}），可在 URL 上指定月份。</p>
+            <div className="row">
+              <a className="btn" href={`/api/reports/instructor-hours.csv?month=${currentMonth()}&op=${operatorId}`}>下载教练带教课时表</a>
+              <a className="btn ghost" href={`/api/reports/arrears.csv?month=${currentMonth()}&op=${operatorId}`}>下载学员欠费表</a>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

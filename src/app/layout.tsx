@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { OperatorProvider, useOperator } from './client';
 
@@ -11,12 +10,7 @@ const LABELS: Record<string, string> = {
 };
 
 function OperatorSelect() {
-  const { operatorId, setOperatorId } = useOperator();
-  const [operators, setOperators] = useState<{ id: number; name: string; role: string }[]>([]);
-
-  useEffect(() => {
-    fetch('/api/operators').then((r) => r.json()).then((d) => setOperators(d.operators));
-  }, []);
+  const { operatorId, setOperatorId, operators } = useOperator();
 
   return (
     <label className="muted">

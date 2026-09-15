@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { todayLocal } from '../date';
+import { isValidDate, todayLocal } from '../date';
 
 export type PaymentResult =
   | { ok: true; paymentId: number }
@@ -21,6 +21,9 @@ export function recordPayment(
   return db.transaction((): PaymentResult => {
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
       return { ok: false, message: '缴费金额必须是正整数（分）' };
+    }
+    if (!isValidDate(paidDate) || paidDate > todayLocal()) {
+      return { ok: false, message: '缴费日期不合法或晚于今天' };
     }
     const student = db.prepare(`SELECT id FROM students WHERE id = ?`).get(studentId);
     if (!student) return { ok: false, message: '学员不存在' };

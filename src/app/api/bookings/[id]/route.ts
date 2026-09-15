@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cancelBooking } from '@/lib/services/booking';
 import { requireObj, str } from '@/lib/validation';
-import { requireOperator } from '@/lib/operator';
+import { requireRole, ROLES } from '@/lib/operator';
 
 // 取消约课：DELETE /api/bookings/:id
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const op = requireOperator(req);
-  if (!op.ok) return NextResponse.json({ error: op.message }, { status: 401 });
+  const op = requireRole(req, ROLES.staff);
+  if (!op.ok) return NextResponse.json({ error: op.message }, { status: op.status });
 
   const bookingId = Number(params.id);
   if (!Number.isInteger(bookingId) || bookingId <= 0) {

@@ -1,6 +1,5 @@
 // 路由层专用：只做参数校验，不含任何业务规则。
 import { isValidDate } from './date';
-
 export type ValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: string };
@@ -32,6 +31,20 @@ export function posIntId(o: Record<string, unknown>, key: string): number | null
 export function dateStr(o: Record<string, unknown>, key: string): string | null {
   const v = str(o, key);
   return v && isValidDate(v) ? v : null;
+}
+
+/**
+ * 带范围的日期入参：日历合法且落在闭区间 [min, max] 内才返回。
+ * min/max 本身必须是合法 YYYY-MM-DD；定宽 ISO 串字典序即时间序。
+ */
+export function dateBetween(
+  o: Record<string, unknown>,
+  key: string,
+  min: string,
+  max: string,
+): string | null {
+  const v = dateStr(o, key);
+  return v && v >= min && v <= max ? v : null;
 }
 
 /** 金额入参：前端传元（最多两位小数），这里转成整数分；拒绝精度外的数字 */

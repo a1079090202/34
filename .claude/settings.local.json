@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(npm config *)",
+      "Bash(npm install *)",
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(node *)",
+      "Bash(cd *)",
+      "Bash(curl -s http://localhost:3000/api/resources)",
+      "Bash(python3 -m json.tool)",
+      "Bash(pkill -f \"next start\")",
+      "Bash(awk '{print $2, $11, $12, $13}')",
+      "Read(//tmp/**)",
+      "Bash(curl -s -i -X POST http://localhost:3000/api/bookings/8/complete -H 'x-operator-id: 3')",
+      "Bash(echo *)",
+      "Bash(pkill -f \"bin/next start\")",
+      "Bash(npx vitest *)",
+      "Bash(pkill -f \"bin/next\")",
+      "Bash(rm -f data/driving-school.db*)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs -r kill)"
+    ]
+  }
+}
